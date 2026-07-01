@@ -1,0 +1,6 @@
+@GGML_Automation_HostAddress = http://localhost:5298
+
+GET {{GGML_Automation_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
