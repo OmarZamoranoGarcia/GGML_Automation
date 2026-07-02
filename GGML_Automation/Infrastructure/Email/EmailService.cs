@@ -4,264 +4,281 @@ using MailKit.Search;
 using MailKit.Security;
 using MimeKit;
 
+using GGML_Automation.Infrastructure.AI;
 using GGML_Automation.Infrastructure.Repository;
 using GGML_Automation.Infrastructure.Storage;
 
 namespace GGML_Automation.Infrastructure.Email;
 
-
 public class EmailService : IEmailService
 {
-    private readonly IConfiguration _configuration;
+    private readonly IConfiguration configuration;
     private readonly IStorageService storage;
     private readonly IEmailRepository repository;
-
+    private readonly ITableExtractionService tableService;
 
     public EmailService(
         IConfiguration configuration,
         IStorageService storage,
-        IEmailRepository repository)
+        IEmailRepository repository,
+        ITableExtractionService tableService)
     {
-        _configuration = configuration;
+        this.configuration = configuration;
         this.storage = storage;
         this.repository = repository;
+        this.tableService = tableService;
     }
-
-
 
     public async Task CheckEmails()
     {
-        var emailUser = _configuration["Email:User"];
-        var emailPassword = _configuration["Email:Password"];
-        var emailService = _configuration["Email:Service"];
-        var emailPort = _configuration["Email:Port"];
-
+        var emailUser = configuration["Email:User"];
+        var emailPassword = configuration["Email:Password"];
+        var emailHost = configuration["Email:Service"];
+        var emailPort = configuration["Email:Port"];
 
         using var client = new ImapClient();
 
-
         await client.ConnectAsync(
-            emailService,
-            int.Parse(emailPort),
-            SecureSocketOptions.SslOnConnect
-        );
-
+            emailHost,
+            int.Parse(emailPort!),
+            SecureSocketOptions.SslOnConnect);
 
         await client.AuthenticateAsync(
             emailUser,
-            emailPassword
-        );
-
+            emailPassword);
 
         var inbox = client.Inbox;
 
-
         await inbox.OpenAsync(
-            FolderAccess.ReadWrite
-        );
-
+            FolderAccess.ReadWrite);
 
         var messages = await inbox.SearchAsync(
-            SearchQuery.NotSeen
-        );
-
+            SearchQuery.NotSeen);
 
         if (!messages.Any())
         {
-            Console.WriteLine(
-                "No hay correos nuevos por leer !!!!!"
-            );
+            Console.WriteLine();
+            Console.WriteLine("========================================");
+            Console.WriteLine("No hay correos nuevos.");
+            Console.WriteLine("========================================");
 
             await client.DisconnectAsync(true);
             return;
         }
 
-
-
-        Console.WriteLine(
-            $"Se encontraron {messages.Count} correos sin leer:"
-        );
-
-        Console.WriteLine(
-            new string('-', 50)
-        );
-
+        Console.WriteLine();
+        Console.WriteLine("========================================");
+        Console.WriteLine($"Correos encontrados: {messages.Count}");
+        Console.WriteLine("========================================");
 
         int counter = 1;
 
-
-
         foreach (var id in messages)
         {
-
-            var message =
-                await inbox.GetMessageAsync(id);
-
-
-
-            var emailId =
-                message.MessageId;
-
-
-
-            Console.WriteLine($"Correo #{counter}");
-            Console.WriteLine($"Asunto: {message.Subject}");
-            Console.WriteLine($"De: {message.From}");
-            Console.WriteLine($"Fecha: {message.Date}");
-
-
-
-            Console.WriteLine("Cuerpo:");
-
-            if (!string.IsNullOrEmpty(message.TextBody))
+            try
             {
-                Console.WriteLine(
-                    message.TextBody
-                );
+                var message =
+                    await inbox.GetMessageAsync(id);
+
+                Console.WriteLine();
+                Console.WriteLine($"Procesando correo #{counter}");
+
+                await ProcessEmail(message);
+
+                await inbox.AddFlagsAsync(
+                    id,
+                    MessageFlags.Seen,
+                    true);
+
+                Console.WriteLine("Correo procesado correctamente.");
             }
-            else if (!string.IsNullOrEmpty(message.HtmlBody))
+            catch (Exception ex)
             {
-                var plainText =
-                    message.HtmlBody
-                    .Replace("<br>", "\n")
-                    .Replace("<p>", "\n");
-
-                Console.WriteLine(
-                    plainText
-                );
-            }
-            else
-            {
-                Console.WriteLine(
-                    "(Sin contenido de texto)"
-                );
+                Console.WriteLine();
+                Console.WriteLine("ERROR");
+                Console.WriteLine(ex.Message);
             }
 
-
-
-            Console.WriteLine();
-
-
-
-            if (await repository.EmailExists(emailId))
-            {
-                Console.WriteLine(
-                    "Correo ya procesado anteriormente."
-                );
-            }
-            else
-            {
-
-                await repository.SaveEmail(
-                    emailId,
-                    message.From.ToString(),
-                    message.Subject,
-                    message.TextBody ?? "",
-                    message.Date.DateTime
-                );
-
-
-
-                if (message.Attachments.Any())
-                {
-
-                    Console.WriteLine(
-                        $"Adjuntos ({message.Attachments.Count()}):"
-                    );
-
-
-
-                    foreach (var attachment in message.Attachments)
-                    {
-
-                        if (attachment is MimePart file)
-                        {
-
-                            Console.WriteLine(
-                                $" - {file.FileName} ({file.ContentType.MimeType})"
-                            );
-
-
-                            using var ms =
-                                new MemoryStream();
-
-
-                            await file.Content.DecodeToAsync(ms);
-
-
-                            var bytes =
-                                ms.ToArray();
-
-
-
-                            var path =
-                                await storage.UploadFile(
-                                    file.FileName,
-                                    bytes
-                                );
-
-
-
-                            await repository.SaveFile(
-                                emailId,
-                                file.FileName,
-                                file.ContentType.MimeType,
-                                path
-                            );
-
-
-
-                            Console.WriteLine(
-                                $"   Guardado en Supabase: {path}"
-                            );
-
-                        }
-                        else if (attachment is MessagePart rfc822)
-                        {
-
-                            Console.WriteLine(
-                                $" - Mensaje adjunto: {rfc822.Message.Subject}"
-                            );
-
-                        }
-
-                    }
-
-                }
-                else
-                {
-                    Console.WriteLine(
-                        "Adjuntos: Ninguno"
-                    );
-                }
-
-            }
-
-
-
-            Console.WriteLine(
-                new string('-', 50)
-            );
-
-
-
-            await inbox.AddFlagsAsync(
-                id,
-                MessageFlags.Seen,
-                true
-            );
-
+            Console.WriteLine(new string('-', 60));
 
             counter++;
-
         }
 
+        await client.DisconnectAsync(true);
+    }
+
+    private async Task ProcessEmail(MimeMessage message)
+    {
+        var emailId =
+            message.MessageId;
+
+        PrintEmail(message);
+
+        if (await repository.EmailExists(emailId))
+        {
+            Console.WriteLine("Correo ya registrado.");
+            return;
+        }
+
+        var body =
+            GetBody(message);
+
+        await repository.SaveEmail(
+            emailId,
+            message.From.ToString(),
+            message.Subject ?? "",
+            body,
+            message.Date.DateTime);
+
+        await repository.CreateProcess(
+            emailId);
+
+        await repository.UpdateEmailStatus(
+            emailId,
+            "PROCESSING");
+
+        try
+        {
+            await SaveAttachments(
+                emailId,
+                message);
+
+            await repository.UpdateEmailStatus(
+                emailId,
+                "COMPLETED");
+        }
+        catch (Exception ex)
+        {
+            await repository.UpdateEmailStatus(
+                emailId,
+                "ERROR");
+        
+            await repository.UpdateProcess(
+                emailId,
+                "ERROR",
+                DateTime.Now,
+                DateTime.Now,
+                ex.Message);
+            throw;
+        }
+    }
+    private async Task SaveAttachments(
+        string emailId,
+        MimeMessage message)
+    {
+        if (!message.Attachments.Any())
+        {
+            Console.WriteLine("Adjuntos: Ninguno");
+            return;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"Adjuntos ({message.Attachments.Count()}):");
+
+        foreach (var attachment in message.Attachments)
+        {
+            if (attachment is MimePart file)
+            {
+                Console.WriteLine(
+                    $" - {file.FileName} ({file.ContentType.MimeType})");
+
+                using var ms = new MemoryStream();
+
+                await file.Content.DecodeToAsync(ms);
+
+                var bytes = ms.ToArray();
+
+                var upload =
+                    await storage.UploadFile(
+                        file.FileName!,
+                        bytes);
+
+                var role =
+                    GetFileRole(file.FileName!);
+
+                await repository.SaveFile(
+                    emailId,
+                    file.FileName!,
+                    upload.StoredName,
+                    file.ContentType.MimeType,
+                    role,
+                    upload.StoragePath);
+
+                Console.WriteLine($"   ✔ Guardado en Storage");
+                Console.WriteLine($"   Nombre original : {file.FileName}");
+                Console.WriteLine($"   Nombre Storage  : {upload.StoredName}");
+                Console.WriteLine($"   Rol             : {role}");
+
+                // AQUÍ VA EL NUEVO FLUJO
+                Console.WriteLine("=== INICIANDO PROCESO EXCEL ===");
+
+                var fileBytes = await storage.DownloadFile(upload.StoredName);
+
+                await tableService.ExtractTable(fileBytes);
+            }
+            else if (attachment is MessagePart rfc822)
+            {
+                Console.WriteLine(
+                    $" - Mensaje adjunto: {rfc822.Message.Subject}");
+            }
+        }
+    }
+
+    private void PrintEmail(
+        MimeMessage message)
+    {
+        Console.WriteLine();
+
+        Console.WriteLine($"Asunto : {message.Subject}");
+        Console.WriteLine($"De     : {message.From}");
+        Console.WriteLine($"Fecha  : {message.Date}");
+
+        Console.WriteLine();
+
+        Console.WriteLine("Cuerpo:");
 
         Console.WriteLine(
-            $"Procesados {messages.Count} correos correctamente."
-        );
+            GetBody(message));
 
+        Console.WriteLine();
+    }
 
-        await client.DisconnectAsync(true);
+    private string GetBody(
+        MimeMessage message)
+    {
+        if (!string.IsNullOrWhiteSpace(message.TextBody))
+        {
+            return message.TextBody;
+        }
+
+        if (!string.IsNullOrWhiteSpace(message.HtmlBody))
+        {
+            return message.HtmlBody
+                .Replace("<br>", "\n")
+                .Replace("<br/>", "\n")
+                .Replace("<br />", "\n")
+                .Replace("<p>", "\n")
+                .Replace("</p>", "")
+                .Replace("&nbsp;", " ");
+        }
+
+        return "";
+    }
+
+    private string GetFileRole(
+        string fileName)
+    {
+        var extension =
+            Path.GetExtension(fileName)
+            .ToLower();
+
+        return extension switch
+        {
+            ".xlsx" => "ORIGINAL",
+            ".xls" => "ORIGINAL",
+            ".csv" => "ORIGINAL",
+
+            _ => "OTHER"
+        };
     }
 }

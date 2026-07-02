@@ -1,5 +1,6 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using DocumentFormat.OpenXml.VariantTypes;
 using GGML_Automation.Infrastructure.Email;
+using Microsoft.AspNetCore.Mvc;
 
 namespace GGML_Automation.Controllers
 {
@@ -18,7 +19,7 @@ namespace GGML_Automation.Controllers
         [HttpGet("check")]
         public async Task<IActionResult> Check()
         {
-
+            
             await emailService.CheckEmails();
 
             return Ok("Correo revisado");

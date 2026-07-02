@@ -1,4 +1,6 @@
+using GGML_Automation.Infrastructure.AI;
 using GGML_Automation.Infrastructure.Email;
+using GGML_Automation.Infrastructure.Excel;
 using GGML_Automation.Infrastructure.Repository;
 using GGML_Automation.Infrastructure.Storage;
 using Supabase;
@@ -17,6 +19,8 @@ builder.Configuration.AddUserSecrets<Program>(); //User secrets
 builder.Services.AddScoped<IEmailService, EmailService>(); //Email service
 builder.Services.AddScoped<IStorageService, SupabaseStorageService>(); //Storage service
 builder.Services.AddScoped<IEmailRepository, EmailRepository>(); //Repository service
+builder.Services.AddScoped<IExcelReaderService, ExcelReaderService>(); //Excel reader service
+builder.Services.AddScoped<ITableExtractionService, OpenAITableExtractionService>(); //Table extraction service
 
 var supabaseUrl =
     builder.Configuration["Supabase:Url"];

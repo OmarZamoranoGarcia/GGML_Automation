@@ -2,21 +2,35 @@
 {
     public interface IEmailRepository
     {
+        Task<bool> EmailExists(string id);
+
         Task SaveEmail(
             string id,
             string arrivalEmail,
             string subject,
             string body,
-            DateTime arrivalAt
-        );
+            DateTime arrivalAt);
 
         Task SaveFile(
             string emailId,
             string fileName,
+            string storedName,
             string fileType,
-            string storagePath
-        );
+            string fileRole,
+            string storagePath);
 
-        Task<bool> EmailExists(string id);
+        Task UpdateEmailStatus(
+            string emailId,
+            string status);
+
+        Task CreateProcess(
+            string emailId);
+
+        Task UpdateProcess(
+            string emailId,
+            string status,
+            DateTime startedAt,
+            DateTime finishedAt,
+            string? errorMessage);
     }
 }

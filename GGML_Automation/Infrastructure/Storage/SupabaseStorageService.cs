@@ -4,32 +4,45 @@ namespace GGML_Automation.Infrastructure.Storage;
 
 public class SupabaseStorageService : IStorageService
 {
-    private readonly Supabase.Client _client;
+    private readonly Supabase.Client client;
 
     public SupabaseStorageService(
         Supabase.Client client)
     {
-        _client = client;
+        this.client = client;
     }
 
-    public async Task<string> UploadFile(
-        string fileName,
-        byte[] file)
+    public async Task<UploadResult> UploadFile(string fileName,byte[] file)
     {
-
         var bucket =
-            _client.Storage
+            client.Storage
             .From("excel-files");
 
-        // Crear nombre único
         var uniqueName =
             $"{Guid.NewGuid()}_{fileName}";
 
         await bucket.Upload(
             file,
-            uniqueName
-        );
+            uniqueName);
 
-        return uniqueName;
+        return new UploadResult
+        {
+            StoredName = uniqueName,
+            StoragePath = uniqueName
+        };
+    }
+
+    public async Task<byte[]> DownloadFile(string storagePath)
+    {
+        var bucket = client.Storage
+            .From("excel-files");
+
+        // Specify null for the optional TransformOptions parameter to resolve ambiguity
+        var file = await bucket.Download(storagePath, (Supabase.Storage.TransformOptions?)null, (EventHandler<float>?)null);
+
+        Console.WriteLine(
+            $"Archivo descargado desde Supabase: {storagePath}");
+
+        return file;
     }
 }
