@@ -21,12 +21,13 @@ builder.Services.AddScoped<IStorageService, SupabaseStorageService>(); //Storage
 builder.Services.AddScoped<IEmailRepository, EmailRepository>(); //Repository service
 builder.Services.AddScoped<IExcelReaderService, ExcelReaderService>(); //Excel reader service
 builder.Services.AddScoped<ITableExtractionService, OpenAITableExtractionService>(); //Table extraction service
+builder.Services.AddScoped<ICsvTableExtractor, CsvTableExtractor>(); //Csv table extractor service
+builder.Services.AddScoped<ITableAnalyzer, OpenAITableAnalyzer>(); //Table analyzer service
+builder.Services.AddScoped<IExcelCleanerService,ExcelCleanerService>(); //Excel cleaner service
 
-var supabaseUrl =
-    builder.Configuration["Supabase:Url"];
+var supabaseUrl = builder.Configuration["Supabase:Url"];
 
-var supabaseKey =
-    builder.Configuration["Supabase:Key"];
+var supabaseKey = builder.Configuration["Supabase:Key"];
 
 var supabaseClient =
     new Supabase.Client(

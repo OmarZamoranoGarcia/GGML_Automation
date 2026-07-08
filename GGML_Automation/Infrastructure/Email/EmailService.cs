@@ -7,6 +7,7 @@ using MimeKit;
 using GGML_Automation.Infrastructure.AI;
 using GGML_Automation.Infrastructure.Repository;
 using GGML_Automation.Infrastructure.Storage;
+using GGML_Automation.Infrastructure.Excel;
 
 namespace GGML_Automation.Infrastructure.Email;
 
@@ -16,17 +17,20 @@ public class EmailService : IEmailService
     private readonly IStorageService storage;
     private readonly IEmailRepository repository;
     private readonly ITableExtractionService tableService;
+    private readonly IExcelCleanerService excelCleaner;
 
     public EmailService(
         IConfiguration configuration,
         IStorageService storage,
         IEmailRepository repository,
-        ITableExtractionService tableService)
+        ITableExtractionService tableService,
+        IExcelCleanerService excelCleaner)
     {
         this.configuration = configuration;
         this.storage = storage;
         this.repository = repository;
         this.tableService = tableService;
+        this.excelCleaner = excelCleaner;
     }
 
     public async Task CheckEmails()
@@ -214,7 +218,27 @@ public class EmailService : IEmailService
 
                 var fileBytes = await storage.DownloadFile(upload.StoredName);
 
-                await tableService.ExtractTable(fileBytes);
+                var table = await tableService.ExtractTable(fileBytes);
+
+                var cleanExcel = await excelCleaner.CreateCleanExcel(table);
+
+                var cleanUpload = await storage.UploadFile($"CLEAN_{file.FileName}",cleanExcel);
+
+                await repository.SaveFile(
+                    emailId,
+                    $"CLEAN_{file.FileName}",
+                    cleanUpload.StoredName,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "CLEANED",
+                    cleanUpload.StoragePath);
+
+                Console.WriteLine();
+                Console.WriteLine("=== EXCEL LIMPIO ===");
+                Console.WriteLine($"Nombre : CLEAN_{file.FileName}");
+                Console.WriteLine($"Storage: {cleanUpload.StoredName}");
+                Console.WriteLine("Rol    : CLEANED");
+                Console.WriteLine();
+
             }
             else if (attachment is MessagePart rfc822)
             {
