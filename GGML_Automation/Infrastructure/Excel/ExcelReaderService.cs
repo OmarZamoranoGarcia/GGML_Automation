@@ -31,9 +31,6 @@ public class ExcelReaderService : IExcelReaderService
 
         var csv = sb.ToString();
 
-        Console.WriteLine("CSV generado correctamente:");
-        Console.WriteLine(csv);
-
         return csv;
     }
 

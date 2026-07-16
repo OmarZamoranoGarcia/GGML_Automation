@@ -155,4 +155,32 @@ public class EmailRepository : IEmailRepository
                 errorMessage
             });
     }
+    public async Task UpdateProcessConfiguration(
+    string emailId,
+    string customer,
+    string groupingColumns,
+    string sumColumns,
+    string aiModel)
+    {
+        using var db = Connection();
+
+        await db.ExecuteAsync(
+            """
+        update email_processes
+        set
+            customer=@customer,
+            grouping_columns=@groupingColumns,
+            sum_columns=@sumColumns,
+            ai_model=@aiModel
+        where email_id=@emailId
+        """,
+            new
+            {
+                emailId,
+                customer,
+                groupingColumns,
+                sumColumns,
+                aiModel
+            });
+    }
 }

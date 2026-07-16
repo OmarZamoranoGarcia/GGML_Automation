@@ -1,0 +1,26 @@
+# Etapa 1: Imagen base para ejecutar la app
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+WORKDIR /app
+EXPOSE 8080
+
+# Etapa 2: Imagen con el SDK para compilar
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+COPY *.csproj ./
+RUN dotnet restore "GGML_Automation.csproj"
+
+COPY . .
+RUN dotnet build "GGML_Automation.csproj" -c Release -o /app/build
+
+# Etapa 3: Publicar
+FROM build AS publish
+RUN dotnet publish "GGML_Automation.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+# Etapa 4: Imagen final, liviana
+FROM base AS final
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y libgssapi-krb5-2 && rm -rf /var/lib/apt/lists/*
+
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "GGML_Automation.dll"]

@@ -2,5 +2,5 @@
 
 public class TableRow
 {
-    public List<string> Cells { get; set; } = [];
+    public List<string> Cells { get; set; } = new List<string>();
 }

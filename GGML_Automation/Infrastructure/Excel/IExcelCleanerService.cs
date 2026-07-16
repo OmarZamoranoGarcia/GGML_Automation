@@ -5,5 +5,7 @@ namespace GGML_Automation.Infrastructure.Excel
     public interface IExcelCleanerService
     {
         Task<byte[]> CreateCleanExcel(TableData table);
+
+        byte[] CreateFinalExcel(TableData table);
     }
 }

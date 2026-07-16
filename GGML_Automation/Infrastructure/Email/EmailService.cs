@@ -1,13 +1,14 @@
-﻿using MailKit;
+﻿using DocumentFormat.OpenXml.Wordprocessing;
+using GGML_Automation.Infrastructure.AI;
+using GGML_Automation.Infrastructure.Excel;
+using GGML_Automation.Infrastructure.Processing;
+using GGML_Automation.Infrastructure.Repository;
+using GGML_Automation.Infrastructure.Storage;
+using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
 using MailKit.Security;
 using MimeKit;
-
-using GGML_Automation.Infrastructure.AI;
-using GGML_Automation.Infrastructure.Repository;
-using GGML_Automation.Infrastructure.Storage;
-using GGML_Automation.Infrastructure.Excel;
 
 namespace GGML_Automation.Infrastructure.Email;
 
@@ -18,19 +19,22 @@ public class EmailService : IEmailService
     private readonly IEmailRepository repository;
     private readonly ITableExtractionService tableService;
     private readonly IExcelCleanerService excelCleaner;
+    private readonly IExcelProcessingService processingService;
 
     public EmailService(
         IConfiguration configuration,
         IStorageService storage,
         IEmailRepository repository,
         ITableExtractionService tableService,
-        IExcelCleanerService excelCleaner)
+        IExcelCleanerService excelCleaner,
+        IExcelProcessingService processingService)
     {
         this.configuration = configuration;
         this.storage = storage;
         this.repository = repository;
         this.tableService = tableService;
         this.excelCleaner = excelCleaner;
+        this.processingService = processingService;
     }
 
     public async Task CheckEmails()
@@ -51,64 +55,62 @@ public class EmailService : IEmailService
             emailUser,
             emailPassword);
 
-        var inbox = client.Inbox;
+        //------------------------------------------------
+        // BANDEJA DE ENTRADA
+        //------------------------------------------------
 
-        await inbox.OpenAsync(
-            FolderAccess.ReadWrite);
+        await ProcessFolder(client.Inbox);
 
-        var messages = await inbox.SearchAsync(
-            SearchQuery.NotSeen);
+        //------------------------------------------------
+        // SPAM
+        //------------------------------------------------
 
-        if (!messages.Any())
+        try
+        {
+            var spam =
+                await client.GetFolderAsync("[Gmail]/Spam");
+
+            await ProcessFolder(spam);
+        }
+        catch (Exception ex)
         {
             Console.WriteLine();
             Console.WriteLine("========================================");
-            Console.WriteLine("No hay correos nuevos.");
+            Console.WriteLine("No fue posible abrir la carpeta Spam.");
+            Console.WriteLine(ex.Message);
             Console.WriteLine("========================================");
-
-            await client.DisconnectAsync(true);
-            return;
-        }
-
-        Console.WriteLine();
-        Console.WriteLine("========================================");
-        Console.WriteLine($"Correos encontrados: {messages.Count}");
-        Console.WriteLine("========================================");
-
-        int counter = 1;
-
-        foreach (var id in messages)
-        {
-            try
-            {
-                var message =
-                    await inbox.GetMessageAsync(id);
-
-                Console.WriteLine();
-                Console.WriteLine($"Procesando correo #{counter}");
-
-                await ProcessEmail(message);
-
-                await inbox.AddFlagsAsync(
-                    id,
-                    MessageFlags.Seen,
-                    true);
-
-                Console.WriteLine("Correo procesado correctamente.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine();
-                Console.WriteLine("ERROR");
-                Console.WriteLine(ex.Message);
-            }
-
-            Console.WriteLine(new string('-', 60));
-
-            counter++;
         }
 
         await client.DisconnectAsync(true);
+    }
+
+    //read emails from Spam
+    private async Task ProcessFolder(
+    IMailFolder folder)
+    {
+        await folder.OpenAsync(FolderAccess.ReadWrite);
+
+        var uids =
+            await folder.SearchAsync(SearchQuery.NotSeen);
+
+        Console.WriteLine();
+        Console.WriteLine($"Carpeta : {folder.FullName}");
+        Console.WriteLine($"Correos : {uids.Count}");
+
+        foreach (var uid in uids)
+        {
+            var message =
+                await folder.GetMessageAsync(uid);
+
+            await ProcessEmail(message);
+
+            await folder.AddFlagsAsync(
+                uid,
+                MessageFlags.Seen,
+                true);
+        }
+
+        await folder.CloseAsync();
     }
 
     private async Task ProcessEmail(MimeMessage message)
@@ -213,32 +215,17 @@ public class EmailService : IEmailService
                 Console.WriteLine($"   Nombre Storage  : {upload.StoredName}");
                 Console.WriteLine($"   Rol             : {role}");
 
-                // AQUÍ VA EL NUEVO FLUJO
                 Console.WriteLine("=== INICIANDO PROCESO EXCEL ===");
 
-                var fileBytes = await storage.DownloadFile(upload.StoredName);
-
-                var table = await tableService.ExtractTable(fileBytes);
-
-                var cleanExcel = await excelCleaner.CreateCleanExcel(table);
-
-                var cleanUpload = await storage.UploadFile($"CLEAN_{file.FileName}",cleanExcel);
-
-                await repository.SaveFile(
+                await processingService.ProcessExcel(
                     emailId,
-                    $"CLEAN_{file.FileName}",
-                    cleanUpload.StoredName,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "CLEANED",
-                    cleanUpload.StoragePath);
+                    upload.StoragePath,
+                    message.Subject ?? "",
+                    GetBody(message),
+                    message.From.ToString());
 
-                Console.WriteLine();
-                Console.WriteLine("=== EXCEL LIMPIO ===");
-                Console.WriteLine($"Nombre : CLEAN_{file.FileName}");
-                Console.WriteLine($"Storage: {cleanUpload.StoredName}");
-                Console.WriteLine("Rol    : CLEANED");
-                Console.WriteLine();
-
+                Console.WriteLine("=== PROCESO EXCEL FINALIZADO ===");
+                Console.WriteLine();          
             }
             else if (attachment is MessagePart rfc822)
             {

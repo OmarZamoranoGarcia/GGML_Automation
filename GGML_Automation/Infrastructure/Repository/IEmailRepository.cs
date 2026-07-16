@@ -32,5 +32,12 @@
             DateTime startedAt,
             DateTime finishedAt,
             string? errorMessage);
+
+        Task UpdateProcessConfiguration(
+            string emailId,
+            string customer,
+            string groupingColumns,
+            string sumColumns,
+            string aiModel);
     }
 }

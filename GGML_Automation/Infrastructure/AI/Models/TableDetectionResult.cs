@@ -8,6 +8,6 @@
 
         public int LastDataRow { get; set; }
 
-        public List<string> Headers { get; set; } = [];
+        public List<string> Headers { get; set; } = new List<string>();
     }
 }
