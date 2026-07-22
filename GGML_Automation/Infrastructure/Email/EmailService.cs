@@ -37,8 +37,10 @@ public class EmailService : IEmailService
         this.processingService = processingService;
     }
 
-    public async Task CheckEmails()
+    public async Task<EmailCheckResult> CheckEmails()
     {
+        var result = new EmailCheckResult();
+
         var emailUser = configuration["Email:User"];
         var emailPassword = configuration["Email:Password"];
         var emailHost = configuration["Email:Service"];
@@ -46,20 +48,35 @@ public class EmailService : IEmailService
 
         using var client = new ImapClient();
 
-        await client.ConnectAsync(
-            emailHost,
-            int.Parse(emailPort!),
-            SecureSocketOptions.SslOnConnect);
+        try
+        {
+            await client.ConnectAsync(
+                emailHost,
+                int.Parse(emailPort!),
+                SecureSocketOptions.SslOnConnect);
 
-        await client.AuthenticateAsync(
-            emailUser,
-            emailPassword);
+            await client.AuthenticateAsync(
+                emailUser,
+                emailPassword);
+        }
+        catch (Exception ex)
+        {
+            result.AddLog(EmailLogLevel.Error, $"No fue posible conectar/autenticar: {ex.Message}");
+            return result; // sin conexión no tiene caso seguir
+        }
 
         //------------------------------------------------
         // BANDEJA DE ENTRADA
         //------------------------------------------------
 
-        await ProcessFolder(client.Inbox);
+        try
+        {
+            await ProcessFolder(client.Inbox, result);
+        }
+        catch (Exception ex)
+        {
+            result.AddLog(EmailLogLevel.Error, $"Error procesando bandeja de entrada: {ex.Message}");
+        }
 
         //------------------------------------------------
         // SPAM
@@ -70,39 +87,40 @@ public class EmailService : IEmailService
             var spam =
                 await client.GetFolderAsync("[Gmail]/Spam");
 
-            await ProcessFolder(spam);
+            await ProcessFolder(spam, result);
         }
         catch (Exception ex)
         {
-            Console.WriteLine();
-            Console.WriteLine("========================================");
-            Console.WriteLine("No fue posible abrir la carpeta Spam.");
-            Console.WriteLine(ex.Message);
-            Console.WriteLine("========================================");
+            result.AddLog(EmailLogLevel.Warning, $"No fue posible abrir la carpeta Spam: {ex.Message}");
         }
 
         await client.DisconnectAsync(true);
+
+        result.AddLog(
+            EmailLogLevel.Info,
+            $"Revisión completada. Procesados: {result.Processed}, Omitidos: {result.Skipped}, Errores: {result.Errors}");
+
+        return result;
     }
 
-    //read emails from Spam
     private async Task ProcessFolder(
-    IMailFolder folder)
+        IMailFolder folder,
+        EmailCheckResult result)
     {
         await folder.OpenAsync(FolderAccess.ReadWrite);
 
         var uids =
             await folder.SearchAsync(SearchQuery.NotSeen);
 
-        Console.WriteLine();
-        Console.WriteLine($"Carpeta : {folder.FullName}");
-        Console.WriteLine($"Correos : {uids.Count}");
+        result.TotalEmailsFound += uids.Count;
+        result.AddLog(EmailLogLevel.Info, $"Carpeta '{folder.FullName}': {uids.Count} correo(s) sin leer.");
 
         foreach (var uid in uids)
         {
             var message =
                 await folder.GetMessageAsync(uid);
 
-            await ProcessEmail(message);
+            await ProcessEmail(message, result);
 
             await folder.AddFlagsAsync(
                 uid,
@@ -113,16 +131,28 @@ public class EmailService : IEmailService
         await folder.CloseAsync();
     }
 
-    private async Task ProcessEmail(MimeMessage message)
+    private async Task ProcessEmail(
+        MimeMessage message,
+        EmailCheckResult result)
     {
         var emailId =
             message.MessageId;
 
         PrintEmail(message);
 
+        var entry = new EmailProcessResult
+        {
+            EmailId = emailId,
+            Subject = message.Subject ?? "",
+            From = message.From.ToString()
+        };
+
         if (await repository.EmailExists(emailId))
         {
-            Console.WriteLine("Correo ya registrado.");
+            entry.Status = "SKIPPED";
+            result.Skipped++;
+            result.Emails.Add(entry);
+            result.AddLog(EmailLogLevel.Info, $"Correo ya registrado: {emailId}");
             return;
         }
 
@@ -145,41 +175,65 @@ public class EmailService : IEmailService
 
         try
         {
-            await SaveAttachments(
-                emailId,
-                message);
+            var excelFilesProcessed =
+                await SaveAttachments(
+                    emailId,
+                    message);
 
             await repository.UpdateEmailStatus(
                 emailId,
                 "COMPLETED");
+
+            if (excelFilesProcessed == 0)
+            {
+                entry.Status = "NOT_PROCESSED";
+                entry.Note = "El adjunto no es un archivo Excel (tipo OTHER); no se procesa, solo se almacena.";
+                result.NotProcessed++;
+                result.AddLog(EmailLogLevel.Info, $"Correo con adjunto tipo OTHER, no procesado: {emailId} ({entry.Subject})");
+            }
+            else
+            {
+                entry.Status = "COMPLETED";
+                result.Processed++;
+                result.AddLog(EmailLogLevel.Info, $"Correo procesado correctamente: {emailId} ({entry.Subject})");
+            }
         }
         catch (Exception ex)
         {
             await repository.UpdateEmailStatus(
                 emailId,
                 "ERROR");
-        
+
             await repository.UpdateProcess(
                 emailId,
                 "ERROR",
                 DateTime.Now,
                 DateTime.Now,
                 ex.Message);
-            throw;
+
+            entry.Status = "ERROR";
+            entry.ErrorMessage = ex.Message;
+            result.Errors++;
+            result.AddLog(EmailLogLevel.Error, $"Error procesando correo {emailId} ({entry.Subject}): {ex.Message}");
         }
+
+        result.Emails.Add(entry);
     }
-    private async Task SaveAttachments(
-        string emailId,
-        MimeMessage message)
+
+    private async Task<int> SaveAttachments(
+    string emailId,
+    MimeMessage message)
     {
         if (!message.Attachments.Any())
         {
             Console.WriteLine("Adjuntos: Ninguno");
-            return;
+            return 0;
         }
 
         Console.WriteLine();
         Console.WriteLine($"Adjuntos ({message.Attachments.Count()}):");
+
+        var excelFilesProcessed = 0;
 
         foreach (var attachment in message.Attachments)
         {
@@ -215,6 +269,13 @@ public class EmailService : IEmailService
                 Console.WriteLine($"   Nombre Storage  : {upload.StoredName}");
                 Console.WriteLine($"   Rol             : {role}");
 
+                if (role != "ORIGINAL")
+                {
+                    Console.WriteLine($"   (Omitido del procesamiento Excel: rol '{role}')");
+                    Console.WriteLine();
+                    continue;
+                }
+
                 Console.WriteLine("=== INICIANDO PROCESO EXCEL ===");
 
                 await processingService.ProcessExcel(
@@ -224,8 +285,10 @@ public class EmailService : IEmailService
                     GetBody(message),
                     message.From.ToString());
 
+                excelFilesProcessed++;
+
                 Console.WriteLine("=== PROCESO EXCEL FINALIZADO ===");
-                Console.WriteLine();          
+                Console.WriteLine();
             }
             else if (attachment is MessagePart rfc822)
             {
@@ -233,6 +296,8 @@ public class EmailService : IEmailService
                     $" - Mensaje adjunto: {rfc822.Message.Subject}");
             }
         }
+
+        return excelFilesProcessed;
     }
 
     private void PrintEmail(
