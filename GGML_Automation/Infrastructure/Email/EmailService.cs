@@ -164,7 +164,7 @@ public class EmailService : IEmailService
             message.From.ToString(),
             message.Subject ?? "",
             body,
-            message.Date.DateTime);
+            message.Date.UtcDateTime);
 
         await repository.CreateProcess(
             emailId);
