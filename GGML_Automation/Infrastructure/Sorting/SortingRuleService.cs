@@ -15,6 +15,7 @@ namespace GGML_Automation.Infrastructure.Sorting
         {
             var cliente1 = configuration["Cliente1:Email"];
             var cliente2 = configuration["Cliente2:Email"];
+            var cliente3 = configuration["Cliente3:Email"];
             from = from.ToLower();
             subject = subject.ToLower();
             body = body.ToLower();
@@ -53,7 +54,22 @@ namespace GGML_Automation.Infrastructure.Sorting
                             "Cantidaddepiezas",
                             "Peso",
                         ]
-                    },               
+                    },
+                    var f when f.Contains(cliente3) => new SortingRule
+                    {
+                        Customer = cliente3,
+
+                        GroupColumns =
+                        [
+                            "FraccionArancelaria"
+                        ],
+
+                        SumColumns =
+                        [
+                            "Cantidaddepiezas",
+                            "Peso",
+                        ]
+                    },
 
                     _ => throw new Exception(
                         $"No existen reglas para el cliente: {from}")
