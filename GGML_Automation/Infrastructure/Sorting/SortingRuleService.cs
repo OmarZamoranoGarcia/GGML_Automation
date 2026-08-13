@@ -16,6 +16,7 @@ namespace GGML_Automation.Infrastructure.Sorting
             var cliente1 = configuration["Cliente1:Email"];
             var cliente2 = configuration["Cliente2:Email"];
             var cliente3 = configuration["Cliente3:Email"];
+            var cliente4 = configuration["Cliente4:Email"];
             from = from.ToLower();
             subject = subject.ToLower();
             body = body.ToLower();
@@ -62,6 +63,23 @@ namespace GGML_Automation.Infrastructure.Sorting
                         GroupColumns =
                         [
                             "FraccionArancelaria"
+                        ],
+
+                        SumColumns =
+                        [
+                            "Cantidaddepiezas",
+                            "Peso",
+                        ]
+                    },
+                    var f when f.Contains(cliente4) => new SortingRule
+                    {
+                        Customer = cliente4,
+
+                        GroupColumns =
+                        [
+                            "ClaveSAT",
+                            "Unidaddemedida",
+                            "FraccionArancelaria",
                         ],
 
                         SumColumns =
