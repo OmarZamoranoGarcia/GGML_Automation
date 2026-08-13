@@ -8,20 +8,23 @@ using GGML_Automation.Infrastructure.Sorting;
 using GGML_Automation.Infrastructure.Storage;
 using Supabase;
 
-var builder = WebApplication.CreateBuilder(args);
-
+//V.3.0
 // Evita que .NET use FileSystemWatcher (inotify) sobre appsettings.json /
 // appsettings.{Environment}.json. En contenedores Linux (Render, Docker) el
 // kernel tiene un límite bajo de inotify instances por default (128), y
 // reiniciar el contenedor varias veces puede agotarlo, tumbando el arranque
 // con: "IOException: The configured user limit (128) on the number of
-// inotify instances has been reached". No necesitamos recarga en caliente
-// de la configuración en producción.
-foreach (var jsonSource in builder.Configuration.Sources
-             .OfType<Microsoft.Extensions.Configuration.Json.JsonConfigurationSource>())
-{
-    jsonSource.ReloadOnChange = false;
-}
+// inotify instances has been reached".
+//
+// IMPORTANTE: esto se lee en una fase de "bootstrap" DENTRO de
+// WebApplication.CreateBuilder(), antes de que appsettings.json se agregue
+// como fuente de configuración. Por eso debe fijarse ANTES de llamar a
+// CreateBuilder — hacerlo después (sobre builder.Configuration) es
+// demasiado tarde: el FileSystemWatcher ya se intentó crear dentro de
+// CreateBuilder y ya truena ahí, antes de que el builder exista.
+Environment.SetEnvironmentVariable("DOTNET_hostBuilder__reloadConfigOnChange", "false");
+
+var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
