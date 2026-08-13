@@ -23,7 +23,9 @@
             ["Unidaddemedida"] = [
                 "Unidad de medida",
                 "unidad de medida",
-                "Unidad de medida",
+                "Unidad de Medida",
+                "Unidad De Medida",
+                "UNIDAD DE MEDIDA",
                 "medida",
                 "Medida"
             ],
