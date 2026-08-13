@@ -53,7 +53,7 @@ namespace GGML_Automation.Infrastructure.Sorting
                         SumColumns =
                         [
                             "Cantidaddepiezas",
-                            "Peso",
+                            "Total",
                         ]
                     },
                     var f when f.Contains(cliente3) => new SortingRule
@@ -68,7 +68,7 @@ namespace GGML_Automation.Infrastructure.Sorting
                         SumColumns =
                         [
                             "Cantidaddepiezas",
-                            "Peso",
+                            "Total",
                         ]
                     },
                     var f when f.Contains(cliente4) => new SortingRule
