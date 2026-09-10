@@ -8,6 +8,7 @@ using GGML_Automation.Infrastructure.Sorting;
 using GGML_Automation.Infrastructure.Storage;
 using Supabase;
 
+//V.3.0
 // Evita que .NET use FileSystemWatcher (inotify) sobre appsettings.json /
 // appsettings.{Environment}.json. En contenedores Linux (Render, Docker) el
 // kernel tiene un límite bajo de inotify instances por default (128), y

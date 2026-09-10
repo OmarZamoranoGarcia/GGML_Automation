@@ -45,6 +45,12 @@
                 "peso",
                 "Peso en Kg",
                 "peso en Kg"
+            ],
+
+            ["Total"] = [
+                "Total",
+                "total",
+                "TOTAL"
             ]
         };
     }
