@@ -6,6 +6,8 @@ using GGML_Automation.Infrastructure.Processing;
 using GGML_Automation.Infrastructure.Repository;
 using GGML_Automation.Infrastructure.Sorting;
 using GGML_Automation.Infrastructure.Storage;
+using GGML_Automation.ManualProcessing;
+using GGML_Automation.ManualProcessing.Services;
 using Supabase;
 
 //V.3.0
@@ -59,6 +61,7 @@ builder.Services.AddScoped<IExcelProcessingService, ExcelProcessingService>(); /
 builder.Services.AddScoped<IExcelCleanerService, ExcelCleanerService>(); //Excel cleaner service
 builder.Services.AddScoped<ISortingRuleService, SortingRuleService>(); //Sorting rule service
 builder.Services.AddScoped<IGroupingService, GroupingService>(); //Grouping service
+builder.Services.AddScoped<IManualProcessingUploadService, ManualProcessingUploadService>(); //Manual excel upload service
 
 var supabaseUrl = builder.Configuration["Supabase:Url"];
 
