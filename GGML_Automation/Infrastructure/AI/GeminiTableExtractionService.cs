@@ -6,6 +6,7 @@ using GGML_Automation.Infrastructure.AI.Prompts;
 using GGML_Automation.Infrastructure.Excel;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Org.BouncyCastle.Asn1.Ocsp;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -18,7 +19,7 @@ public class GeminiTableExtractionService : ITableExtractionService
 {
     private readonly IConfiguration configuration;
     private readonly HttpClient http;
-    public GeminiTableExtractionService(IConfiguration configuration,HttpClient http)
+    public GeminiTableExtractionService(IConfiguration configuration, HttpClient http)
     {
         this.configuration = configuration;
         this.http = http;
@@ -156,7 +157,7 @@ public class GeminiTableExtractionService : ITableExtractionService
         var prompt = TableDetectionPrompt.Build(csv);
 
         //ENDPOINT CORRECTO para Gemini (generateContent)
-        var url = $"{baseUrl}/models/{model}:generateContent" + (string.IsNullOrEmpty(apiKey) ? "" : $"?key={apiKey}");    
+        var url = $"{baseUrl}/models/{model}:generateContent" + (string.IsNullOrEmpty(apiKey) ? "" : $"?key={apiKey}");
 
         //PAYLOAD CORRECTO para Gemini (formato generateContent)
         var payload = new
@@ -181,11 +182,8 @@ public class GeminiTableExtractionService : ITableExtractionService
 
         var json = JsonSerializer.Serialize(payload);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-        var response = await http.SendAsync(request);
-        var responseBody = await response.Content.ReadAsStringAsync();
+        // ---- Llamada a Gemini con reintentos ante 429 / 503 ----
+        var (response, responseBody) = await SendWithRetryAsync(url, json);
 
         //Debug para ver que muuestra la respuesta de Gemini
         Console.WriteLine();
@@ -194,7 +192,17 @@ public class GeminiTableExtractionService : ITableExtractionService
         Console.WriteLine(responseBody);
         Console.WriteLine("=======================================");
 
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            // Si después de los reintentos sigue fallando, dejamos claro
+            // en el mensaje de error que el problema viene del lado de Gemini,
+            // no de nuestra API.
+            throw new Exception(
+                $"La API de Google Gemini no respondió correctamente después de varios intentos " +
+                $"(status {(int)response.StatusCode} - {response.StatusCode}). " +
+                $"Esto normalmente indica saturación o límite de cuota en Gemini, no un error en GGML_Automation. " +
+                $"Detalle: {responseBody}");
+        }
 
         // PARSEO CORRECTO para respuesta de Gemini
         string contentText = null!;
@@ -257,6 +265,54 @@ public class GeminiTableExtractionService : ITableExtractionService
 
         return detection;
     }
+
+    // Reintenta la llamada a Gemini cuando responde 429 (Too Many Requests)
+    // o 503 (Service Unavailable / modelo saturado), con backoff exponencial.
+    // Estos dos códigos casi siempre son transitorios del lado de Google,
+    // no errores de nuestro código.
+    private async Task<(HttpResponseMessage response, string body)> SendWithRetryAsync(
+        string url,
+        string jsonPayload,
+        int maxRetries = 3)
+    {
+        HttpResponseMessage response = null!;
+        string body = "";
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+            response = await http.SendAsync(request);
+            body = await response.Content.ReadAsStringAsync();
+
+            var isTransient =
+                response.StatusCode == HttpStatusCode.TooManyRequests ||   // 429
+                response.StatusCode == HttpStatusCode.ServiceUnavailable;  // 503
+
+            if (response.IsSuccessStatusCode || !isTransient)
+            {
+                // Éxito, o un error que no tiene sentido reintentar (400, 401, etc.)
+                return (response, body);
+            }
+
+            if (attempt < maxRetries)
+            {
+                var delaySeconds = Math.Pow(2, attempt); // 2s, 4s, 8s...
+                Console.WriteLine(
+                    $"[Gemini] Intento {attempt}/{maxRetries} falló con {(int)response.StatusCode} " +
+                    $"({response.StatusCode}). Reintentando en {delaySeconds}s...");
+
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+            }
+        }
+
+        // Se agotaron los reintentos, regresamos la última respuesta tal cual
+        // para que el llamador decida qué hacer (en DetectTable se convierte
+        // en una excepción clara).
+        return (response, body);
+    }
+
     private TableData BuildTable(
     string csv,
     TableDetectionResult detection)
